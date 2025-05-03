@@ -25,8 +25,7 @@
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
-      "id": "REPLACE_WITH_YOUR_KV_NAMESPACE_ID",
-      "preview_id": "REPLACE_WITH_YOUR_KV_NAMESPACE_PREVIEW_ID"
+      "id": "CLICKUP_API_KEY"
     }
   ],
   "observability": {
