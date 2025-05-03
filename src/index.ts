@@ -57,7 +57,23 @@ export class MyMCP extends McpAgent {
   // Store environment variables
   public static clickupApiKey: string | undefined;
 
-  async init() {
+  async init(options?: any) {
+    console.log("Init options:", JSON.stringify(options || {}, null, 2));
+
+    // Check for API key in the static property
+    if (MyMCP.clickupApiKey) {
+      GLOBAL_CLICKUP_API_KEY = MyMCP.clickupApiKey;
+      console.log(
+        "API key set from static property:",
+        !!GLOBAL_CLICKUP_API_KEY
+      );
+    }
+    // Set the global API key from options if available
+    else if (options?.env?.CLICKUP_API_KEY) {
+      GLOBAL_CLICKUP_API_KEY = options.env.CLICKUP_API_KEY;
+      console.log("API key set from options.env:", !!GLOBAL_CLICKUP_API_KEY);
+    }
+
     // Log global API key availability
     console.log(
       "In init - Global API Key available:",
@@ -67,22 +83,22 @@ export class MyMCP extends McpAgent {
     // Workspaces tools
     this.server.tool("getWorkspaces", {}, async (_args: any, extra: any) => {
       console.log("Global API Key available:", !!GLOBAL_CLICKUP_API_KEY);
+      console.log("Static API Key available:", !!MyMCP.clickupApiKey);
 
-      if (!GLOBAL_CLICKUP_API_KEY)
+      // Try both sources for API key
+      const apiKey = GLOBAL_CLICKUP_API_KEY || MyMCP.clickupApiKey;
+
+      if (!apiKey)
         return {
           content: [
             {
               type: "text",
-              text: "API key not provided. Make sure CLICKUP_API_KEY is set in .dev.vars",
+              text: "API key not provided. Make sure CLICKUP_API_KEY is set in your environment variables",
             },
           ],
         };
 
-      const result = await callClickUpApi(
-        "team",
-        "GET",
-        GLOBAL_CLICKUP_API_KEY
-      );
+      const result = await callClickUpApi("team", "GET", apiKey);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     });
 
@@ -91,13 +107,16 @@ export class MyMCP extends McpAgent {
       "getSpaces",
       { workspaceId: z.string() },
       async ({ workspaceId }: { workspaceId: string }, extra: any) => {
-        if (!GLOBAL_CLICKUP_API_KEY)
+        // Try both sources for API key
+        const apiKey = GLOBAL_CLICKUP_API_KEY || MyMCP.clickupApiKey;
+
+        if (!apiKey)
           return { content: [{ type: "text", text: "API key not provided" }] };
 
         const result = await callClickUpApi(
           `team/${workspaceId}/space`,
           "GET",
-          GLOBAL_CLICKUP_API_KEY
+          apiKey
         );
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
@@ -532,14 +551,18 @@ export default {
     GLOBAL_CLICKUP_API_KEY = env.CLICKUP_API_KEY;
     console.log("API key set globally:", !!GLOBAL_CLICKUP_API_KEY);
 
+    // Explicitly set on MyMCP class as well
+    MyMCP.clickupApiKey = env.CLICKUP_API_KEY;
+    console.log("API key set on class:", !!MyMCP.clickupApiKey);
+
     if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-      // @ts-ignore
-      return MyMCP.serveSSE("/sse", { env }).fetch(request, env, ctx);
+      // @ts-ignore - Force type to work with Cloudflare
+      return MyMCP.serveSSE("/sse", {}).fetch(request, env, ctx);
     }
 
     if (url.pathname === "/mcp") {
-      // @ts-ignore
-      return MyMCP.serve("/mcp", { env }).fetch(request, env, ctx);
+      // @ts-ignore - Force type to work with Cloudflare
+      return MyMCP.serve("/mcp", {}).fetch(request, env, ctx);
     }
 
     return new Response("Not found", { status: 404 });
