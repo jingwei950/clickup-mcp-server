@@ -25,7 +25,7 @@
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
-      "id": "CLICKUP_API_KEY"
+      "id": "d51f70cf9d754943a747e9d5dad3766d"
     }
   ],
   "observability": {
