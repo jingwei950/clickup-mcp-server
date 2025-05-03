@@ -1,105 +1,163 @@
-# ClickUp MCP Server
+# Building a Remote MCP Server on Cloudflare (Without Auth)
 
-A Model Context Protocol (MCP) server that provides an interface to the ClickUp API. This server runs on Cloudflare Workers and allows AI assistants to interact with ClickUp resources using the MCP protocol.
+This example allows you to deploy a remote MCP server that doesn't require authentication on Cloudflare Workers.
 
-## Features
+## Get started:
 
-- OAuth authentication with ClickUp
-- Support for both ClickUp API v2 and v3 endpoints
-- CRUD operations for:
-  - Workspaces (Teams)
-  - Spaces
-  - Lists
-  - Tasks
-  - Docs
+[![Deploy to Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/ai/tree/main/demos/remote-mcp-authless)
 
-## Setup
+This will deploy your MCP server to a URL like: `remote-mcp-server-authless.<your-account>.workers.dev/sse`
 
-1. Clone this repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Configure your Cloudflare Worker:
-   - You'll need a KV namespace for storing OAuth tokens
-   - Set up the necessary environment variables
-
-## Development
+Alternatively, you can use the command line below to get the remote MCP Server created on your local machine:
 
 ```bash
-npm run dev
+npm create cloudflare@latest -- my-mcp-server --template=cloudflare/ai/demos/remote-mcp-authless
 ```
 
-## Deployment
+## Deploying to Your Own Cloudflare Worker
 
-```bash
-npm run deploy
+Instead of using the one-click deploy button, you can clone this repository and deploy it manually to your Cloudflare account.
+
+1.  **Clone the repository:**
+    ```bash
+    git clone <repository-url>
+    cd <repository-directory>
+    ```
+2.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+3.  **Login to Cloudflare:**
+    ```bash
+    npx wrangler login
+    ```
+4.  **Deploy:**
+    ```bash
+    npx wrangler deploy
+    ```
+    This command will build and deploy your worker. Wrangler will provide you with the URL where your worker is deployed (e.g., `my-mcp-server.<your-account>.workers.dev/sse`).
+
+## Managing Secrets (API Keys)
+
+If your custom tools require API keys or other secrets, you need to configure them securely.
+
+### Production Secrets (Cloudflare Dashboard/Wrangler)
+
+For your deployed worker, use Cloudflare's secret management:
+
+1.  **Using Wrangler:**
+
+    ```bash
+    npx wrangler secret put YOUR_SECRET_NAME
+    ```
+
+    Wrangler will prompt you to enter the secret value. This value will be encrypted and securely stored, accessible only to your worker code.
+
+2.  **Using Cloudflare Dashboard:**
+    Go to your Worker in the Cloudflare dashboard -> Settings -> Variables -> Environment Variables -> Add Variable. Make sure to click "Encrypt" to store it securely.
+
+### Local Development Secrets (`.dev.vars`)
+
+For local testing using `npx wrangler dev`, create a file named `.dev.vars` in the root of your project directory. **Do not commit this file to Git.** Add your secrets to this file like so:
+
+```plaintext
+# .dev.vars - For local development only!
+YOUR_SECRET_NAME="your_secret_value_here"
+ANOTHER_SECRET="another_value"
 ```
 
-## API Tools
+### Accessing Secrets in Code
 
-### Authentication
+In your `src/index.ts` or other TypeScript files, you can access these secrets via the `env` object passed to the `fetch` handler or within the `init()` method if you pass the `env` object during initialization:
 
-- `auth`: Exchange OAuth authorization code for an access token
-  - Parameters: `clientId`, `clientSecret`, `code`, `redirectUri`
+```typescript
+// Example in src/index.ts
+export default {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<Response> {
+    // Access secrets like this:
+    const apiKey = env.YOUR_SECRET_NAME;
+    // ... rest of your code
+  },
+};
 
-### User
+// Example structure if you need env in init()
+class MyMCPImplementation {
+  server: MCP;
+  env: Env; // Store env if needed
 
-- `getAuthorizedUser`: Get the currently authenticated user
-  - Parameters: `accessToken`
-- `getAuthorizedWorkspaces`: Get workspaces the user has access to
-  - Parameters: `accessToken`
+  constructor(env: Env) {
+    this.env = env;
+    this.server = new MCP();
+    this.init();
+  }
 
-### Spaces
+  init() {
+    // Access secrets here:
+    const apiKey = this.env.YOUR_SECRET_NAME;
 
-- `getSpaces`: Get all spaces in a workspace
-  - Parameters: `accessToken`, `workspaceId`
-- `createSpace`: Create a new space
-  - Parameters: `accessToken`, `workspaceId`, `name`, `features` (optional)
-- `getSpace`: Get details of a specific space
-  - Parameters: `accessToken`, `spaceId`
-- `updateSpace`: Update a space
-  - Parameters: `accessToken`, `spaceId`, `name` (optional), `features` (optional)
-- `deleteSpace`: Delete a space
-  - Parameters: `accessToken`, `spaceId`
+    // Define tools using the secrets if necessary
+    this.server.tool(/* ... */);
+  }
+  // ... rest of the class
+}
 
-### Lists
+export default {
+  async fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext
+  ): Promise<Response> {
+    const mcpImplementation = new MyMCPImplementation(env);
+    return mcpImplementation.server.handle(request);
+  },
+};
 
-- `getLists`: Get lists in a folder or space
-  - Parameters: `accessToken`, `folderId` or `spaceId`
-- `createList`: Create a new list
-  - Parameters: `accessToken`, `folderId` or `spaceId`, `name`, plus optional fields
+// Define the Env interface (if not already defined)
+interface Env {
+  YOUR_SECRET_NAME: string;
+  ANOTHER_SECRET: string;
+  // Add other secrets/bindings here
+}
+```
 
-### Tasks
+Remember to define the types for your secrets in the `Env` interface, usually found or needed in `src/index.ts`.
 
-- `getTasks`: Get tasks in a list
-  - Parameters: `accessToken`, `listId`, plus optional filtering parameters
-- `createTask`: Create a new task
-  - Parameters: `accessToken`, `listId`, `name`, plus optional fields
-- `getTask`: Get details of a specific task
-  - Parameters: `accessToken`, `taskId`
-- `updateTask`: Update a task
-  - Parameters: `accessToken`, `taskId`, plus fields to update
-- `deleteTask`: Delete a task
-  - Parameters: `accessToken`, `taskId`
+## Customizing your MCP Server
 
-### Docs
+To add your own [tools](https://developers.cloudflare.com/agents/model-context-protocol/tools/) to the MCP server, define each tool inside the `init()` method of `src/index.ts` using `this.server.tool(...)`.
 
-- `searchDocs`: Search for docs in a workspace
-  - Parameters: `accessToken`, `workspaceId`, `query` (optional)
-- `createDoc`: Create a new doc
-  - Parameters: `accessToken`, `workspaceId` (optional), `parent`, `title`, `content` (optional)
-- `getDoc`: Get a specific doc
-  - Parameters: `accessToken`, `docId`
+## Connect to Cloudflare AI Playground
 
-## ClickUp OAuth Flow
+You can connect to your MCP server from the Cloudflare AI Playground, which is a remote MCP client:
 
-1. Register an OAuth application in ClickUp
-2. Redirect users to the ClickUp authorization URL
-3. User authorizes your application
-4. ClickUp redirects back to your redirect URI with an authorization code
-5. Exchange the authorization code for an access token using the `auth` tool
+1. Go to https://playground.ai.cloudflare.com/
+2. Enter your deployed MCP server URL (`remote-mcp-server-authless.<your-account>.workers.dev/sse`)
+3. You can now use your MCP tools directly from the playground!
 
-## License
+## Connect Claude Desktop to your MCP server
 
-MIT
+You can also connect to your remote MCP server from local MCP clients, by using the [mcp-remote proxy](https://www.npmjs.com/package/mcp-remote).
+
+To connect to your MCP server from Claude Desktop, follow [Anthropic's Quickstart](https://modelcontextprotocol.io/quickstart/user) and within Claude Desktop go to Settings > Developer > Edit Config.
+
+Update with this configuration:
+
+```json
+{
+  "mcpServers": {
+    "calculator": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8787/sse" // or remote-mcp-server-authless.your-account.workers.dev/sse
+      ]
+    }
+  }
+}
+```
+
+Restart Claude and you should see the tools become available.
