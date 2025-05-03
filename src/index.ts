@@ -99,31 +99,60 @@ export class MyMCP extends McpAgent {
 
     // Workspaces tools
     this.server.tool("getWorkspaces", {}, async (_args: any, extra: any) => {
-      // Check for the API key in the request context if available
+      console.log(
+        "Extra object in getWorkspaces:",
+        JSON.stringify(extra || {}, null, 2)
+      );
+
+      let apiKey: string | undefined;
+
+      // Priority 1: Check extra.env (passed via serve options)
       if (extra?.env?.CLICKUP_API_KEY) {
-        GLOBAL_CLICKUP_API_KEY = extra.env.CLICKUP_API_KEY;
-        console.log(
-          "API key set from extra.env in getWorkspaces:",
-          !!GLOBAL_CLICKUP_API_KEY
-        );
+        apiKey = extra.env.CLICKUP_API_KEY;
+        console.log("Found API key in extra.env");
       }
 
-      console.log("Global API Key available:", !!GLOBAL_CLICKUP_API_KEY);
-      console.log("Static API Key available:", !!MyMCP.clickupApiKey);
+      // Priority 2: Check request headers in extra object
+      if (!apiKey) {
+        try {
+          const request = extra?.request || extra?.req;
+          if (request && request.headers && request.headers.get) {
+            const headerApiKey = request.headers.get("X-ClickUp-API-Key");
+            if (headerApiKey) {
+              apiKey = headerApiKey;
+              console.log("Found API key in extra request header");
+            }
+          }
+        } catch (e) {
+          console.error("Error checking extra request headers:", e);
+        }
+      }
 
-      // Try both sources for API key
-      const apiKey = GLOBAL_CLICKUP_API_KEY || MyMCP.clickupApiKey;
+      // Priority 3: Fallback to static class property (set in fetch)
+      if (!apiKey && MyMCP.clickupApiKey) {
+        apiKey = MyMCP.clickupApiKey;
+        console.log("Using API key from static property as fallback");
+      }
 
-      if (!apiKey)
+      // Priority 4: Fallback to global variable (set in fetch)
+      if (!apiKey && GLOBAL_CLICKUP_API_KEY) {
+        apiKey = GLOBAL_CLICKUP_API_KEY;
+        console.log("Using API key from global variable as fallback");
+      }
+
+      if (!apiKey) {
+        console.error("API Key is missing in getWorkspaces context.");
         return {
           content: [
             {
               type: "text",
-              text: "API key not provided. Make sure CLICKUP_API_KEY is set in your environment variables",
+              text: "API key could not be found in the execution context. Ensure CLICKUP_API_KEY is set correctly.",
             },
           ],
         };
+      }
 
+      console.log("Using API key for call (getWorkspaces)");
       const result = await callClickUpApi("team", "GET", apiKey);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
     });
