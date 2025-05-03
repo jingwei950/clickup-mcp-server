@@ -57,6 +57,21 @@ export class MyMCP extends McpAgent {
   // Store environment variables
   public static clickupApiKey: string | undefined;
 
+  // Override DO initialization to pick up API key from the DO environment
+  async _init(props: any) {
+    // If the DO environment has the API key, set it on the class and global variable
+    if ((this as any).env?.CLICKUP_API_KEY) {
+      GLOBAL_CLICKUP_API_KEY = (this as any).env.CLICKUP_API_KEY;
+      MyMCP.clickupApiKey = (this as any).env.CLICKUP_API_KEY;
+      console.log(
+        "API key set from DO env in _init:",
+        !!GLOBAL_CLICKUP_API_KEY
+      );
+    }
+    // Proceed with base initialization logic (props storage and init)
+    await super._init(props);
+  }
+
   async init(options?: any) {
     console.log("Init options:", JSON.stringify(options || {}, null, 2));
 
