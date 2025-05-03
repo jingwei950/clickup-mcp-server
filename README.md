@@ -1,50 +1,105 @@
-# Building a Remote MCP Server on Cloudflare (Without Auth)
+# ClickUp MCP Server
 
-This example allows you to deploy a remote MCP server that doesn't require authentication on Cloudflare Workers. 
+A Model Context Protocol (MCP) server that provides an interface to the ClickUp API. This server runs on Cloudflare Workers and allows AI assistants to interact with ClickUp resources using the MCP protocol.
 
-## Get started: 
+## Features
 
-[![Deploy to Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/ai/tree/main/demos/remote-mcp-authless)
+- OAuth authentication with ClickUp
+- Support for both ClickUp API v2 and v3 endpoints
+- CRUD operations for:
+  - Workspaces (Teams)
+  - Spaces
+  - Lists
+  - Tasks
+  - Docs
 
-This will deploy your MCP server to a URL like: `remote-mcp-server-authless.<your-account>.workers.dev/sse`
+## Setup
 
-Alternatively, you can use the command line below to get the remote MCP Server created on your local machine:
+1. Clone this repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Configure your Cloudflare Worker:
+   - You'll need a KV namespace for storing OAuth tokens
+   - Set up the necessary environment variables
+
+## Development
+
 ```bash
-npm create cloudflare@latest -- my-mcp-server --template=cloudflare/ai/demos/remote-mcp-authless
+npm run dev
 ```
 
-## Customizing your MCP Server
+## Deployment
 
-To add your own [tools](https://developers.cloudflare.com/agents/model-context-protocol/tools/) to the MCP server, define each tool inside the `init()` method of `src/index.ts` using `this.server.tool(...)`. 
-
-## Connect to Cloudflare AI Playground
-
-You can connect to your MCP server from the Cloudflare AI Playground, which is a remote MCP client:
-
-1. Go to https://playground.ai.cloudflare.com/
-2. Enter your deployed MCP server URL (`remote-mcp-server-authless.<your-account>.workers.dev/sse`)
-3. You can now use your MCP tools directly from the playground!
-
-## Connect Claude Desktop to your MCP server
-
-You can also connect to your remote MCP server from local MCP clients, by using the [mcp-remote proxy](https://www.npmjs.com/package/mcp-remote). 
-
-To connect to your MCP server from Claude Desktop, follow [Anthropic's Quickstart](https://modelcontextprotocol.io/quickstart/user) and within Claude Desktop go to Settings > Developer > Edit Config.
-
-Update with this configuration:
-
-```json
-{
-  "mcpServers": {
-    "calculator": {
-      "command": "npx",
-      "args": [
-        "mcp-remote",
-        "http://localhost:8787/sse"  // or remote-mcp-server-authless.your-account.workers.dev/sse
-      ]
-    }
-  }
-}
+```bash
+npm run deploy
 ```
 
-Restart Claude and you should see the tools become available. 
+## API Tools
+
+### Authentication
+
+- `auth`: Exchange OAuth authorization code for an access token
+  - Parameters: `clientId`, `clientSecret`, `code`, `redirectUri`
+
+### User
+
+- `getAuthorizedUser`: Get the currently authenticated user
+  - Parameters: `accessToken`
+- `getAuthorizedWorkspaces`: Get workspaces the user has access to
+  - Parameters: `accessToken`
+
+### Spaces
+
+- `getSpaces`: Get all spaces in a workspace
+  - Parameters: `accessToken`, `workspaceId`
+- `createSpace`: Create a new space
+  - Parameters: `accessToken`, `workspaceId`, `name`, `features` (optional)
+- `getSpace`: Get details of a specific space
+  - Parameters: `accessToken`, `spaceId`
+- `updateSpace`: Update a space
+  - Parameters: `accessToken`, `spaceId`, `name` (optional), `features` (optional)
+- `deleteSpace`: Delete a space
+  - Parameters: `accessToken`, `spaceId`
+
+### Lists
+
+- `getLists`: Get lists in a folder or space
+  - Parameters: `accessToken`, `folderId` or `spaceId`
+- `createList`: Create a new list
+  - Parameters: `accessToken`, `folderId` or `spaceId`, `name`, plus optional fields
+
+### Tasks
+
+- `getTasks`: Get tasks in a list
+  - Parameters: `accessToken`, `listId`, plus optional filtering parameters
+- `createTask`: Create a new task
+  - Parameters: `accessToken`, `listId`, `name`, plus optional fields
+- `getTask`: Get details of a specific task
+  - Parameters: `accessToken`, `taskId`
+- `updateTask`: Update a task
+  - Parameters: `accessToken`, `taskId`, plus fields to update
+- `deleteTask`: Delete a task
+  - Parameters: `accessToken`, `taskId`
+
+### Docs
+
+- `searchDocs`: Search for docs in a workspace
+  - Parameters: `accessToken`, `workspaceId`, `query` (optional)
+- `createDoc`: Create a new doc
+  - Parameters: `accessToken`, `workspaceId` (optional), `parent`, `title`, `content` (optional)
+- `getDoc`: Get a specific doc
+  - Parameters: `accessToken`, `docId`
+
+## ClickUp OAuth Flow
+
+1. Register an OAuth application in ClickUp
+2. Redirect users to the ClickUp authorization URL
+3. User authorizes your application
+4. ClickUp redirects back to your redirect URI with an authorization code
+5. Exchange the authorization code for an access token using the `auth` tool
+
+## License
+
+MIT
