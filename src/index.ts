@@ -2,912 +2,519 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-// Define interface for Cloudflare Worker environment
+// Define environment type
 interface Env {
-  OAUTH_KV: KVNamespace;
-  MCP_OBJECT: DurableObjectNamespace<MyMCP>;
-  ASSETS: Fetcher;
+  CLICKUP_API_KEY: string;
 }
 
-// Define our MCP agent with tools
+// Global storage for API key to ensure it's accessible everywhere
+let GLOBAL_CLICKUP_API_KEY: string | undefined;
+
+// Helper function to make API calls to ClickUp
+async function callClickUpApi(
+  path: string,
+  method: string,
+  apiKey: string,
+  body?: any
+) {
+  const apiVersion = path.startsWith("/v3") ? "v3" : "v2";
+  const baseUrl = `https://api.clickup.com/api/${apiVersion}`;
+  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+
+  const headers = {
+    Authorization: apiKey,
+    "Content-Type": "application/json",
+  };
+
+  const options: RequestInit = {
+    method,
+    headers,
+  };
+
+  if (body && (method === "POST" || method === "PUT" || method === "PATCH")) {
+    options.body = JSON.stringify(body);
+  }
+
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      const errorData = await response.json();
+      return { error: errorData, status: response.status };
+    }
+    return await response.json();
+  } catch (error: any) {
+    return { error: error.message || "Unknown error occurred" };
+  }
+}
+
+// Define our MCP agent with ClickUp tools
 export class MyMCP extends McpAgent {
   server = new McpServer({
-    name: "ClickUp API Bridge",
+    name: "ClickUp MCP",
     version: "1.0.0",
   });
 
-  // Access to Cloudflare Worker environment
-  env: Env | null = null;
-
-  // Store OAuth tokens in KV
-  async saveToken(clientId: string, token: any): Promise<void> {
-    if (!this.env || !this.env.OAUTH_KV) {
-      console.error("KV namespace not available");
-      return;
-    }
-
-    try {
-      await this.env.OAUTH_KV.put(`token:${clientId}`, JSON.stringify(token));
-      console.log(`Token saved for client ${clientId}`);
-    } catch (error: any) {
-      console.error(`Failed to save token: ${error.message}`);
-    }
-  }
-
-  async getToken(clientId: string): Promise<any | null> {
-    if (!this.env || !this.env.OAUTH_KV) {
-      console.error("KV namespace not available");
-      return null;
-    }
-
-    try {
-      const tokenData = await this.env.OAUTH_KV.get(`token:${clientId}`);
-      if (!tokenData) {
-        console.log(`No token found for client ${clientId}`);
-        return null;
-      }
-
-      return JSON.parse(tokenData);
-    } catch (error: any) {
-      console.error(`Failed to retrieve token: ${error.message}`);
-      return null;
-    }
-  }
-
-  // Helper to determine API version for endpoints
-  getApiUrl(endpoint: string, version: "v2" | "v3" = "v2"): string {
-    return `https://api.clickup.com/api/${version}/${endpoint}`;
-  }
-
-  // Helper to make authenticated API calls to ClickUp
-  async fetchClickUp(
-    endpoint: string,
-    accessToken: string,
-    options: RequestInit = {},
-    version: "v2" | "v3" = "v2"
-  ): Promise<any> {
-    const url = this.getApiUrl(endpoint, version);
-    const headers = {
-      Authorization: accessToken,
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        headers,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(`ClickUp API error: ${JSON.stringify(errorData)}`);
-      }
-
-      return await response.json();
-    } catch (error: any) {
-      console.error("Error fetching from ClickUp API:", error);
-      throw error;
-    }
-  }
+  // Store environment variables
+  public static clickupApiKey: string | undefined;
 
   async init() {
-    // Authentication tool
-    this.server.tool(
-      "auth",
-      {
-        clientId: z.string(),
-        clientSecret: z.string(),
-        code: z.string(),
-        redirectUri: z.string(),
-      },
-      async ({ clientId, clientSecret, code, redirectUri }) => {
-        try {
-          // Exchange code for access token
-          const response = await fetch(
-            "https://api.clickup.com/api/v2/oauth/token",
+    // Log global API key availability
+    console.log(
+      "In init - Global API Key available:",
+      !!GLOBAL_CLICKUP_API_KEY
+    );
+
+    // Workspaces tools
+    this.server.tool("getWorkspaces", {}, async (_args: any, extra: any) => {
+      console.log("Global API Key available:", !!GLOBAL_CLICKUP_API_KEY);
+
+      if (!GLOBAL_CLICKUP_API_KEY)
+        return {
+          content: [
             {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                client_id: clientId,
-                client_secret: clientSecret,
-                code,
-                grant_type: "authorization_code",
-                redirect_uri: redirectUri,
-              }),
-            }
-          );
+              type: "text",
+              text: "API key not provided. Make sure CLICKUP_API_KEY is set in .dev.vars",
+            },
+          ],
+        };
 
-          if (!response.ok) {
-            const errorData = await response.json();
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `Authentication failed: ${JSON.stringify(errorData)}`,
-                },
-              ],
-            };
-          }
+      const result = await callClickUpApi(
+        "team",
+        "GET",
+        GLOBAL_CLICKUP_API_KEY
+      );
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    });
 
-          const tokenData = await response.json();
-          // Save token to KV storage
-          await this.saveToken(clientId, tokenData);
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Authentication successful. You can now use the ClickUp API.",
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Authentication error: ${error.message}`,
-              },
-            ],
-          };
-        }
-      }
-    );
-
-    // Get authorized user
-    this.server.tool(
-      "getAuthorizedUser",
-      {
-        accessToken: z.string(),
-      },
-      async ({ accessToken }) => {
-        try {
-          const userData = await this.fetchClickUp("user", accessToken);
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(userData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching user data: ${error.message}`,
-              },
-            ],
-          };
-        }
-      }
-    );
-
-    // Get authorized workspaces
-    this.server.tool(
-      "getAuthorizedWorkspaces",
-      {
-        accessToken: z.string(),
-      },
-      async ({ accessToken }) => {
-        try {
-          const workspacesData = await this.fetchClickUp("team", accessToken);
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(workspacesData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching workspaces: ${error.message}`,
-              },
-            ],
-          };
-        }
-      }
-    );
-
-    // === Spaces operations ===
+    // Spaces tools
     this.server.tool(
       "getSpaces",
-      {
-        accessToken: z.string(),
-        workspaceId: z.string(),
-      },
-      async ({ accessToken, workspaceId }) => {
-        try {
-          const spacesData = await this.fetchClickUp(
-            `team/${workspaceId}/space`,
-            accessToken
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(spacesData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching spaces: ${error.message}`,
-              },
-            ],
-          };
-        }
+      { workspaceId: z.string() },
+      async ({ workspaceId }: { workspaceId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `team/${workspaceId}/space`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "createSpace",
       {
-        accessToken: z.string(),
         workspaceId: z.string(),
         name: z.string(),
         features: z
           .object({
-            multiple_assignees: z.boolean().optional(),
-            due_dates: z.boolean().optional(),
-            time_tracking: z.boolean().optional(),
-            priorities: z.boolean().optional(),
-            tags: z.boolean().optional(),
-            time_estimates: z.boolean().optional(),
-            checklists: z.boolean().optional(),
-            custom_fields: z.boolean().optional(),
-            remap_dependencies: z.boolean().optional(),
-            dependency_warning: z.boolean().optional(),
-            portfolios: z.boolean().optional(),
+            lists: z.object({ enabled: z.boolean() }).optional(),
+            tasks: z.object({ enabled: z.boolean() }).optional(),
+            docs: z.object({ enabled: z.boolean() }).optional(),
+            whiteboards: z.object({ enabled: z.boolean() }).optional(),
           })
           .optional(),
       },
-      async ({ accessToken, workspaceId, name, features }) => {
-        try {
-          const response = await this.fetchClickUp(
-            `team/${workspaceId}/space`,
-            accessToken,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                name,
-                features,
-              }),
-            }
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error creating space: ${error.message}`,
-              },
-            ],
-          };
-        }
+      async (args: any, extra: any) => {
+        const { workspaceId, name, features } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `team/${workspaceId}/space`,
+          "POST",
+          GLOBAL_CLICKUP_API_KEY,
+          { name, features }
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "getSpace",
-      {
-        accessToken: z.string(),
-        spaceId: z.string(),
-      },
-      async ({ accessToken, spaceId }) => {
-        try {
-          const spaceData = await this.fetchClickUp(
-            `space/${spaceId}`,
-            accessToken
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(spaceData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching space: ${error.message}`,
-              },
-            ],
-          };
-        }
+      { spaceId: z.string() },
+      async ({ spaceId }: { spaceId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `space/${spaceId}`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "updateSpace",
       {
-        accessToken: z.string(),
         spaceId: z.string(),
         name: z.string().optional(),
         features: z
           .object({
-            multiple_assignees: z.boolean().optional(),
-            due_dates: z.boolean().optional(),
-            time_tracking: z.boolean().optional(),
-            priorities: z.boolean().optional(),
-            tags: z.boolean().optional(),
-            time_estimates: z.boolean().optional(),
-            checklists: z.boolean().optional(),
-            custom_fields: z.boolean().optional(),
-            remap_dependencies: z.boolean().optional(),
-            dependency_warning: z.boolean().optional(),
-            portfolios: z.boolean().optional(),
+            lists: z.object({ enabled: z.boolean() }).optional(),
+            tasks: z.object({ enabled: z.boolean() }).optional(),
+            docs: z.object({ enabled: z.boolean() }).optional(),
+            whiteboards: z.object({ enabled: z.boolean() }).optional(),
           })
           .optional(),
       },
-      async ({ accessToken, spaceId, name, features }) => {
-        try {
-          const response = await this.fetchClickUp(
-            `space/${spaceId}`,
-            accessToken,
-            {
-              method: "PUT",
-              body: JSON.stringify({
-                name,
-                features,
-              }),
-            }
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error updating space: ${error.message}`,
-              },
-            ],
-          };
-        }
+      async (args: any, extra: any) => {
+        const { spaceId, ...data } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `space/${spaceId}`,
+          "PUT",
+          GLOBAL_CLICKUP_API_KEY,
+          data
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "deleteSpace",
-      {
-        accessToken: z.string(),
-        spaceId: z.string(),
-      },
-      async ({ accessToken, spaceId }) => {
-        try {
-          const response = await this.fetchClickUp(
-            `space/${spaceId}`,
-            accessToken,
-            {
-              method: "DELETE",
-            }
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error deleting space: ${error.message}`,
-              },
-            ],
-          };
-        }
+      { spaceId: z.string() },
+      async ({ spaceId }: { spaceId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `space/${spaceId}`,
+          "DELETE",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
-    // === Lists operations ===
+    // Folders tools
+    this.server.tool(
+      "getFolders",
+      { spaceId: z.string() },
+      async ({ spaceId }: { spaceId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `space/${spaceId}/folder`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    this.server.tool(
+      "createFolder",
+      {
+        spaceId: z.string(),
+        name: z.string(),
+      },
+      async (
+        { spaceId, name }: { spaceId: string; name: string },
+        extra: any
+      ) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `space/${spaceId}/folder`,
+          "POST",
+          GLOBAL_CLICKUP_API_KEY,
+          { name }
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    // Lists tools
     this.server.tool(
       "getLists",
-      {
-        accessToken: z.string(),
-        folderId: z.string().optional(),
-        spaceId: z.string().optional(),
-      },
-      async ({ accessToken, folderId, spaceId }) => {
-        try {
-          let endpoint;
-          if (folderId) {
-            endpoint = `folder/${folderId}/list`;
-          } else if (spaceId) {
-            endpoint = `space/${spaceId}/list`;
-          } else {
-            throw new Error("Either folderId or spaceId must be provided");
-          }
+      { folderId: z.string() },
+      async ({ folderId }: { folderId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
 
-          const listsData = await this.fetchClickUp(endpoint, accessToken);
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(listsData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching lists: ${error.message}`,
-              },
-            ],
-          };
-        }
+        const result = await callClickUpApi(
+          `folder/${folderId}/list`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    this.server.tool(
+      "getFolderlessList",
+      { spaceId: z.string() },
+      async ({ spaceId }: { spaceId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `space/${spaceId}/list`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "createList",
       {
-        accessToken: z.string(),
-        folderId: z.string().optional(),
-        spaceId: z.string().optional(),
+        folderId: z.string(),
         name: z.string(),
         content: z.string().optional(),
-        due_date: z.number().optional(),
-        due_date_time: z.boolean().optional(),
-        priority: z
-          .object({
-            priority: z.string(),
-            color: z.string(),
-          })
-          .optional(),
-        assignee: z.string().optional(),
-        status: z.string().optional(),
       },
-      async ({ accessToken, folderId, spaceId, ...listData }) => {
-        try {
-          let endpoint;
-          if (folderId) {
-            endpoint = `folder/${folderId}/list`;
-          } else if (spaceId) {
-            endpoint = `space/${spaceId}/list`;
-          } else {
-            throw new Error("Either folderId or spaceId must be provided");
-          }
+      async (args: any, extra: any) => {
+        const { folderId, name, content } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
 
-          const response = await this.fetchClickUp(endpoint, accessToken, {
-            method: "POST",
-            body: JSON.stringify(listData),
-          });
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error creating list: ${error.message}`,
-              },
-            ],
-          };
-        }
+        const result = await callClickUpApi(
+          `folder/${folderId}/list`,
+          "POST",
+          GLOBAL_CLICKUP_API_KEY,
+          { name, content }
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
-    // === Tasks operations ===
+    // Tasks tools
     this.server.tool(
       "getTasks",
       {
-        accessToken: z.string(),
         listId: z.string(),
         page: z.number().optional(),
-        order_by: z.string().optional(),
-        reverse: z.boolean().optional(),
-        subtasks: z.boolean().optional(),
         statuses: z.array(z.string()).optional(),
-        include_closed: z.boolean().optional(),
         assignees: z.array(z.string()).optional(),
-        due_date_gt: z.number().optional(),
-        due_date_lt: z.number().optional(),
-        date_created_gt: z.number().optional(),
-        date_created_lt: z.number().optional(),
-        date_updated_gt: z.number().optional(),
-        date_updated_lt: z.number().optional(),
-        custom_fields: z.array(z.any()).optional(),
       },
-      async ({ accessToken, listId, ...queryParams }) => {
-        try {
-          // Convert query params to URL query string
-          const params = new URLSearchParams();
-          for (const [key, value] of Object.entries(queryParams)) {
-            if (Array.isArray(value)) {
-              value.forEach((v) => params.append(key, String(v)));
-            } else if (value !== undefined) {
-              params.append(key, String(value));
-            }
+      async (args: any, extra: any) => {
+        const { listId, ...params } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const queryParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+          if (Array.isArray(value)) {
+            value.forEach((v) => queryParams.append(key, v));
+          } else if (value !== undefined) {
+            queryParams.append(key, String(value));
           }
+        });
 
-          const query = params.toString();
-          const endpoint = `list/${listId}/task${query ? `?${query}` : ""}`;
-
-          const tasksData = await this.fetchClickUp(endpoint, accessToken);
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(tasksData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching tasks: ${error.message}`,
-              },
-            ],
-          };
-        }
+        const query = queryParams.toString()
+          ? `?${queryParams.toString()}`
+          : "";
+        const result = await callClickUpApi(
+          `list/${listId}/task${query}`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "createTask",
       {
-        accessToken: z.string(),
         listId: z.string(),
         name: z.string(),
         description: z.string().optional(),
-        assignees: z.array(z.string()).optional(),
-        tags: z.array(z.string()).optional(),
         status: z.string().optional(),
         priority: z.number().optional(),
-        due_date: z.number().optional(),
-        due_date_time: z.boolean().optional(),
-        time_estimate: z.number().optional(),
-        start_date: z.number().optional(),
-        start_date_time: z.boolean().optional(),
-        notify_all: z.boolean().optional(),
-        parent: z.string().optional(),
-        links_to: z.string().optional(),
-        custom_fields: z.array(z.any()).optional(),
+        dueDate: z.number().optional(),
+        assignees: z.array(z.string()).optional(),
+        tags: z.array(z.string()).optional(),
       },
-      async ({ accessToken, listId, ...taskData }) => {
-        try {
-          const endpoint = `list/${listId}/task`;
+      async (args: any, extra: any) => {
+        const { listId, ...taskData } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
 
-          const response = await this.fetchClickUp(endpoint, accessToken, {
-            method: "POST",
-            body: JSON.stringify(taskData),
-          });
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error creating task: ${error.message}`,
-              },
-            ],
-          };
-        }
+        const result = await callClickUpApi(
+          `list/${listId}/task`,
+          "POST",
+          GLOBAL_CLICKUP_API_KEY,
+          taskData
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "getTask",
-      {
-        accessToken: z.string(),
-        taskId: z.string(),
-      },
-      async ({ accessToken, taskId }) => {
-        try {
-          const taskData = await this.fetchClickUp(
-            `task/${taskId}`,
-            accessToken
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(taskData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching task: ${error.message}`,
-              },
-            ],
-          };
-        }
+      { taskId: z.string() },
+      async ({ taskId }: { taskId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `task/${taskId}`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "updateTask",
       {
-        accessToken: z.string(),
         taskId: z.string(),
         name: z.string().optional(),
         description: z.string().optional(),
-        assignees: z
-          .object({
-            add: z.array(z.string()).optional(),
-            rem: z.array(z.string()).optional(),
-          })
-          .optional(),
-        tags: z
-          .object({
-            add: z.array(z.string()).optional(),
-            rem: z.array(z.string()).optional(),
-          })
-          .optional(),
         status: z.string().optional(),
         priority: z.number().optional(),
-        due_date: z.number().optional(),
-        due_date_time: z.boolean().optional(),
-        time_estimate: z.number().optional(),
-        start_date: z.number().optional(),
-        start_date_time: z.boolean().optional(),
-        notify_all: z.boolean().optional(),
-        parent: z.string().optional(),
-        links_to: z.string().optional(),
-        custom_fields: z.record(z.any()).optional(),
+        dueDate: z.number().optional(),
       },
-      async ({ accessToken, taskId, ...taskData }) => {
-        try {
-          const response = await this.fetchClickUp(
-            `task/${taskId}`,
-            accessToken,
-            {
-              method: "PUT",
-              body: JSON.stringify(taskData),
-            }
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error updating task: ${error.message}`,
-              },
-            ],
-          };
-        }
+      async (args: any, extra: any) => {
+        const { taskId, ...taskData } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `task/${taskId}`,
+          "PUT",
+          GLOBAL_CLICKUP_API_KEY,
+          taskData
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "deleteTask",
-      {
-        accessToken: z.string(),
-        taskId: z.string(),
-      },
-      async ({ accessToken, taskId }) => {
-        try {
-          const response = await this.fetchClickUp(
-            `task/${taskId}`,
-            accessToken,
-            {
-              method: "DELETE",
-            }
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error deleting task: ${error.message}`,
-              },
-            ],
-          };
-        }
+      { taskId: z.string() },
+      async ({ taskId }: { taskId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `task/${taskId}`,
+          "DELETE",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
-    // === Docs operations ===
+    // Docs tools
     this.server.tool(
       "searchDocs",
       {
-        accessToken: z.string(),
         workspaceId: z.string(),
         query: z.string().optional(),
         page: z.number().optional(),
-        include_archived: z.boolean().optional(),
       },
-      async ({ accessToken, workspaceId, ...params }) => {
-        try {
-          // Convert query params to URL query string
-          const queryParams = new URLSearchParams();
-          for (const [key, value] of Object.entries(params)) {
-            if (value !== undefined) {
-              queryParams.append(key, String(value));
-            }
+      async (args: any, extra: any) => {
+        const { workspaceId, ...params } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const queryParams = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => {
+          if (value !== undefined) {
+            queryParams.append(key, String(value));
           }
+        });
 
-          const queryString = queryParams.toString();
-          const endpoint = `team/${workspaceId}/doc${
-            queryString ? `?${queryString}` : ""
-          }`;
-
-          const docsData = await this.fetchClickUp(
-            endpoint,
-            accessToken,
-            {},
-            "v3"
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(docsData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error searching docs: ${error.message}`,
-              },
-            ],
-          };
-        }
+        const query = queryParams.toString()
+          ? `?${queryParams.toString()}`
+          : "";
+        const result = await callClickUpApi(
+          `team/${workspaceId}/doc${query}`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "createDoc",
       {
-        accessToken: z.string(),
-        workspaceId: z.string().optional(),
-        parent: z.object({
-          id: z.string(),
-          type: z.enum(["folder", "doc", "space", "list"]),
-        }),
+        workspaceId: z.string(),
         title: z.string(),
-        content: z.any().optional(),
+        content: z.string().optional(),
+        parentDoc: z.string().optional(),
       },
-      async ({ accessToken, workspaceId, parent, title, content }) => {
-        try {
-          let endpoint = "doc";
+      async (args: any, extra: any) => {
+        const { workspaceId, ...docData } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
 
-          // For v3 API
-          if (workspaceId) {
-            endpoint = `team/${workspaceId}/doc`;
-          }
-
-          const response = await this.fetchClickUp(
-            endpoint,
-            accessToken,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                parent,
-                title,
-                content,
-              }),
-            },
-            "v3"
-          );
-
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(response),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error creating doc: ${error.message}`,
-              },
-            ],
-          };
-        }
+        const result = await callClickUpApi(
+          `team/${workspaceId}/doc`,
+          "POST",
+          GLOBAL_CLICKUP_API_KEY,
+          docData
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
 
     this.server.tool(
       "getDoc",
+      { docId: z.string() },
+      async ({ docId }: { docId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `doc/${docId}`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    // Comments tools
+    this.server.tool(
+      "getTaskComments",
+      { taskId: z.string() },
+      async ({ taskId }: { taskId: string }, extra: any) => {
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `task/${taskId}/comment`,
+          "GET",
+          GLOBAL_CLICKUP_API_KEY
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    this.server.tool(
+      "createTaskComment",
       {
-        accessToken: z.string(),
-        docId: z.string(),
+        taskId: z.string(),
+        comment_text: z.string(),
+        assignee: z.string().optional(),
+        notify_all: z.boolean().optional(),
       },
-      async ({ accessToken, docId }) => {
-        try {
-          const docData = await this.fetchClickUp(
-            `doc/${docId}`,
-            accessToken,
-            {},
-            "v3"
-          );
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify(docData),
-              },
-            ],
-          };
-        } catch (error: any) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error fetching doc: ${error.message}`,
-              },
-            ],
-          };
-        }
+      async (args: any, extra: any) => {
+        const { taskId, ...commentData } = args;
+        if (!GLOBAL_CLICKUP_API_KEY)
+          return { content: [{ type: "text", text: "API key not provided" }] };
+
+        const result = await callClickUpApi(
+          `task/${taskId}/comment`,
+          "POST",
+          GLOBAL_CLICKUP_API_KEY,
+          commentData
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
   }
@@ -916,19 +523,23 @@ export class MyMCP extends McpAgent {
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext) {
     const url = new URL(request.url);
+    console.log(
+      "Incoming request - CLICKUP_API_KEY available:",
+      !!env.CLICKUP_API_KEY
+    );
 
-    // Initialize the env property on the class prototype
-    // This makes it available to all instances created by the static methods
-    MyMCP.prototype.env = env;
+    // Set the global API key directly
+    GLOBAL_CLICKUP_API_KEY = env.CLICKUP_API_KEY;
+    console.log("API key set globally:", !!GLOBAL_CLICKUP_API_KEY);
 
     if (url.pathname === "/sse" || url.pathname === "/sse/message") {
       // @ts-ignore
-      return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+      return MyMCP.serveSSE("/sse", { env }).fetch(request, env, ctx);
     }
 
     if (url.pathname === "/mcp") {
       // @ts-ignore
-      return MyMCP.serve("/mcp").fetch(request, env, ctx);
+      return MyMCP.serve("/mcp", { env }).fetch(request, env, ctx);
     }
 
     return new Response("Not found", { status: 404 });
