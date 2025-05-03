@@ -74,6 +74,23 @@ export class MyMCP extends McpAgent {
       console.log("API key set from options.env:", !!GLOBAL_CLICKUP_API_KEY);
     }
 
+    // Try to get API key from request headers
+    try {
+      const request = options?.request || options?.req;
+      if (request && request.headers && request.headers.get) {
+        const headerApiKey = request.headers.get("X-ClickUp-API-Key");
+        if (headerApiKey) {
+          GLOBAL_CLICKUP_API_KEY = headerApiKey;
+          console.log(
+            "API key set from request header:",
+            !!GLOBAL_CLICKUP_API_KEY
+          );
+        }
+      }
+    } catch (e) {
+      console.error("Error getting API key from request headers:", e);
+    }
+
     // Log global API key availability
     console.log(
       "In init - Global API Key available:",
@@ -82,6 +99,15 @@ export class MyMCP extends McpAgent {
 
     // Workspaces tools
     this.server.tool("getWorkspaces", {}, async (_args: any, extra: any) => {
+      // Check for the API key in the request context if available
+      if (extra?.env?.CLICKUP_API_KEY) {
+        GLOBAL_CLICKUP_API_KEY = extra.env.CLICKUP_API_KEY;
+        console.log(
+          "API key set from extra.env in getWorkspaces:",
+          !!GLOBAL_CLICKUP_API_KEY
+        );
+      }
+
       console.log("Global API Key available:", !!GLOBAL_CLICKUP_API_KEY);
       console.log("Static API Key available:", !!MyMCP.clickupApiKey);
 
@@ -555,14 +581,26 @@ export default {
     MyMCP.clickupApiKey = env.CLICKUP_API_KEY;
     console.log("API key set on class:", !!MyMCP.clickupApiKey);
 
+    // Save the API key in the headers for the SSE context
+    const modifiedRequest = new Request(request.url, {
+      method: request.method,
+      headers: new Headers(request.headers),
+      body: request.body,
+    });
+    modifiedRequest.headers.set("X-ClickUp-API-Key", env.CLICKUP_API_KEY || "");
+
     if (url.pathname === "/sse" || url.pathname === "/sse/message") {
       // @ts-ignore - Force type to work with Cloudflare
-      return MyMCP.serveSSE("/sse", {}).fetch(request, env, ctx);
+      return MyMCP.serveSSE("/sse", {
+        // Use binding for any potential DO binding
+      }).fetch(modifiedRequest, env as any, ctx);
     }
 
     if (url.pathname === "/mcp") {
       // @ts-ignore - Force type to work with Cloudflare
-      return MyMCP.serve("/mcp", {}).fetch(request, env, ctx);
+      return MyMCP.serve("/mcp", {
+        // Use binding for any potential DO binding
+      }).fetch(modifiedRequest, env as any, ctx);
     }
 
     return new Response("Not found", { status: 404 });
