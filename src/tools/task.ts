@@ -14,23 +14,42 @@ export function registerTaskTools(
   server.tool(
     "getTasks",
     {
-      listId: z.string(),
+      list_id: z.number(),
+      archived: z.boolean().optional(),
+      include_markdown_description: z.boolean().optional(),
       page: z.number().optional(),
+      order_by: z.string().optional(),
+      reverse: z.boolean().optional(),
+      subtasks: z.boolean().optional(),
       statuses: z.array(z.string()).optional(),
+      include_closed: z.boolean().optional(),
       assignees: z.array(z.string()).optional(),
+      watchers: z.array(z.string()).optional(),
+      tags: z.array(z.string()).optional(),
+      due_date_gt: z.number().optional(),
+      due_date_lt: z.number().optional(),
+      date_created_gt: z.number().optional(),
+      date_created_lt: z.number().optional(),
+      date_updated_gt: z.number().optional(),
+      date_updated_lt: z.number().optional(),
+      date_done_gt: z.number().optional(),
+      date_done_lt: z.number().optional(),
+      custom_fields: z.array(z.string()).optional(),
+      custom_field: z.array(z.string()).optional(),
+      custom_items: z.array(z.number()).optional(),
     },
-    async ({ listId, ...params }) => {
+    async ({ list_id, ...params }) => {
       const apiKey = getApiKey();
       if (!apiKey)
         return { content: [{ type: "text", text: "API key missing." }] };
       const query = new URLSearchParams();
       Object.entries(params).forEach(([k, v]) => {
-        if (Array.isArray(v)) v.forEach((x) => query.append(k, x));
+        if (Array.isArray(v)) v.forEach((x) => query.append(k, String(x)));
         else if (v !== undefined) query.append(k, String(v));
       });
       const qstr = query.toString() ? `?${query.toString()}` : "";
       const result = await callClickUpApi(
-        `list/${listId}/task${qstr}`,
+        `list/${list_id}/task${qstr}`,
         "GET",
         apiKey
       );
