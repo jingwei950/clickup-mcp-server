@@ -56,6 +56,23 @@ export class MyMCP extends McpAgent<Env> {
       return headerKey || this.env.CLICKUP_API_KEY;
     };
 
+    // Authorized User
+    this.server.tool("getAuthorizedUser", {}, async () => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "API key missing. Set 'CLICKUP_API_KEY' binding or 'X-ClickUp-API-Key' header.",
+            },
+          ],
+        };
+      }
+      const result = await callClickUpApi("user", "GET", apiKey);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    });
+
     // Workspaces
     this.server.tool("getWorkspaces", {}, async () => {
       const apiKey = getApiKey();
@@ -264,6 +281,23 @@ export class MyMCP extends McpAgent<Env> {
           "PUT",
           apiKey,
           { name }
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    // Delete a folder
+    this.server.tool(
+      "deleteFolder",
+      { folderId: z.string() },
+      async ({ folderId }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const result = await callClickUpApi(
+          `folder/${folderId}`,
+          "DELETE",
+          apiKey
         );
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
