@@ -141,7 +141,7 @@ export class MyMCP extends McpAgent<Env> {
       {
         spaceId: z.string(),
         name: z.string(),
-        color: z.string(),
+        color: z.string().optional(),
         private: z.boolean(),
         admin_can_manage: z.boolean().optional(),
         multiple_assignees: z.boolean().optional(),
@@ -171,7 +171,7 @@ export class MyMCP extends McpAgent<Env> {
           return { content: [{ type: "text", text: "API key missing." }] };
         const payload = {
           name,
-          color,
+          color: color || "#7B68EE",
           private: isPrivate,
           admin_can_manage,
           multiple_assignees,
