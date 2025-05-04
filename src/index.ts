@@ -15,9 +15,18 @@ async function callClickUpApi(
   apiKey: string,
   body?: any
 ) {
-  const apiVersion = path.startsWith("/v3") ? "v3" : "v2";
+  // Choose version and adjust path for v3 endpoints
+  let apiVersion = "v2";
+  let endpointPath = path;
+  if (path.startsWith("/v3")) {
+    apiVersion = "v3";
+    // drop leading '/v3' so we don't duplicate it in the URL
+    endpointPath = path.slice(3);
+  }
   const baseUrl = `https://api.clickup.com/api/${apiVersion}`;
-  const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  const url = `${baseUrl}${
+    endpointPath.startsWith("/") ? endpointPath : `/${endpointPath}`
+  }`;
 
   const headers: Record<string, string> = {
     Authorization: apiKey,
@@ -93,17 +102,14 @@ export class MyMCP extends McpAgent<Env> {
     // Spaces
     this.server.tool(
       "getSpaces",
-      {
-        team_id: z.number(),
-        archived: z.boolean().optional(),
-      },
-      async ({ team_id, archived }) => {
+      { teamId: z.number(), archived: z.boolean().optional() },
+      async ({ teamId, archived }) => {
         const apiKey = getApiKey();
         if (!apiKey)
           return { content: [{ type: "text", text: "API key missing." }] };
         const query = archived !== undefined ? `?archived=${archived}` : "";
         const result = await callClickUpApi(
-          `team/${team_id}/space${query}`,
+          `team/${teamId}/space${query}`,
           "GET",
           apiKey
         );
@@ -115,24 +121,38 @@ export class MyMCP extends McpAgent<Env> {
       {
         workspaceId: z.string(),
         name: z.string(),
-        multiple_assignees: z.boolean(),
+        multipleAssignees: z.boolean(),
         features: z.object({
-          due_dates: z.object({ enabled: z.boolean() }),
-          time_tracking: z.object({ enabled: z.boolean() }),
+          dueDates: z.object({ enabled: z.boolean() }),
+          timeTracking: z.object({ enabled: z.boolean() }),
           tags: z.object({ enabled: z.boolean() }),
-          time_estimates: z.object({ enabled: z.boolean() }),
+          timeEstimates: z.object({ enabled: z.boolean() }),
           checklists: z.object({ enabled: z.boolean() }),
-          custom_fields: z.object({ enabled: z.boolean() }),
-          remap_dependencies: z.object({ enabled: z.boolean() }),
-          dependency_warning: z.object({ enabled: z.boolean() }),
+          customFields: z.object({ enabled: z.boolean() }),
+          remapDependencies: z.object({ enabled: z.boolean() }),
+          dependencyWarning: z.object({ enabled: z.boolean() }),
           portfolios: z.object({ enabled: z.boolean() }),
         }),
       },
-      async ({ workspaceId, name, multiple_assignees, features }) => {
+      async ({ workspaceId, name, multipleAssignees, features }) => {
         const apiKey = getApiKey();
         if (!apiKey)
           return { content: [{ type: "text", text: "API key missing." }] };
-        const payload = { name, multiple_assignees, features };
+        const payload = {
+          name,
+          multiple_assignees: multipleAssignees,
+          features: {
+            due_dates: features.dueDates,
+            time_tracking: features.timeTracking,
+            tags: features.tags,
+            time_estimates: features.timeEstimates,
+            checklists: features.checklists,
+            custom_fields: features.customFields,
+            remap_dependencies: features.remapDependencies,
+            dependency_warning: features.dependencyWarning,
+            portfolios: features.portfolios,
+          },
+        };
         const result = await callClickUpApi(
           `team/${workspaceId}/space`,
           "POST",
@@ -159,18 +179,18 @@ export class MyMCP extends McpAgent<Env> {
         spaceId: z.string(),
         name: z.string(),
         color: z.string().optional(),
-        private: z.boolean(),
-        admin_can_manage: z.boolean().optional(),
-        multiple_assignees: z.boolean().optional(),
+        isPrivate: z.boolean(),
+        adminCanManage: z.boolean().optional(),
+        multipleAssignees: z.boolean().optional(),
         features: z.object({
-          due_dates: z.object({ enabled: z.boolean() }),
-          time_tracking: z.object({ enabled: z.boolean() }),
+          dueDates: z.object({ enabled: z.boolean() }),
+          timeTracking: z.object({ enabled: z.boolean() }),
           tags: z.object({ enabled: z.boolean() }),
-          time_estimates: z.object({ enabled: z.boolean() }),
+          timeEstimates: z.object({ enabled: z.boolean() }),
           checklists: z.object({ enabled: z.boolean() }),
-          custom_fields: z.object({ enabled: z.boolean() }),
-          remap_dependencies: z.object({ enabled: z.boolean() }),
-          dependency_warning: z.object({ enabled: z.boolean() }),
+          customFields: z.object({ enabled: z.boolean() }),
+          remapDependencies: z.object({ enabled: z.boolean() }),
+          dependencyWarning: z.object({ enabled: z.boolean() }),
           portfolios: z.object({ enabled: z.boolean() }),
         }),
       },
@@ -178,9 +198,9 @@ export class MyMCP extends McpAgent<Env> {
         spaceId,
         name,
         color,
-        private: isPrivate,
-        admin_can_manage,
-        multiple_assignees,
+        isPrivate,
+        adminCanManage,
+        multipleAssignees,
         features,
       }) => {
         const apiKey = getApiKey();
@@ -190,9 +210,19 @@ export class MyMCP extends McpAgent<Env> {
           name,
           color: color || "#7B68EE",
           private: isPrivate,
-          admin_can_manage,
-          multiple_assignees,
-          features,
+          admin_can_manage: adminCanManage,
+          multiple_assignees: multipleAssignees,
+          features: {
+            due_dates: features.dueDates,
+            time_tracking: features.timeTracking,
+            tags: features.tags,
+            time_estimates: features.timeEstimates,
+            checklists: features.checklists,
+            custom_fields: features.customFields,
+            remap_dependencies: features.remapDependencies,
+            dependency_warning: features.dependencyWarning,
+            portfolios: features.portfolios,
+          },
         };
         const result = await callClickUpApi(
           `space/${spaceId}`,
@@ -319,21 +349,7 @@ export class MyMCP extends McpAgent<Env> {
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
-    this.server.tool(
-      "getFolderlessList",
-      { spaceId: z.string() },
-      async ({ spaceId }) => {
-        const apiKey = getApiKey();
-        if (!apiKey)
-          return { content: [{ type: "text", text: "API key missing." }] };
-        const result = await callClickUpApi(
-          `space/${spaceId}/list`,
-          "GET",
-          apiKey
-        );
-        return { content: [{ type: "text", text: JSON.stringify(result) }] };
-      }
-    );
+
     this.server.tool(
       "createList",
       {
@@ -351,6 +367,91 @@ export class MyMCP extends McpAgent<Env> {
           apiKey,
           { name, content: listContent }
         );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    this.server.tool(
+      "getFolderlessList",
+      { spaceId: z.string() },
+      async ({ spaceId }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const result = await callClickUpApi(
+          `space/${spaceId}/list`,
+          "GET",
+          apiKey
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    this.server.tool("getList", { listId: z.string() }, async ({ listId }) => {
+      const apiKey = getApiKey();
+      if (!apiKey)
+        return { content: [{ type: "text", text: "API key missing." }] };
+
+      const result = await callClickUpApi(`list/${listId}`, "GET", apiKey);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    });
+
+    // Add updateList tool under getList
+    this.server.tool(
+      "updateList",
+      {
+        listId: z.string(),
+        name: z.string().optional(),
+        content: z.string().optional(),
+        dueDate: z.number().optional(),
+        dueDateTime: z.boolean().optional(),
+        priority: z.number().optional(),
+        assignee: z.string().optional(),
+        status: z.string().optional(),
+        unsetStatus: z.boolean().optional(),
+      },
+      async ({
+        listId,
+        name,
+        content,
+        dueDate,
+        dueDateTime,
+        priority,
+        assignee,
+        status,
+        unsetStatus,
+      }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const body: any = {};
+        if (name !== undefined) body.name = name;
+        if (content !== undefined) body.content = content;
+        if (dueDate !== undefined) body.due_date = dueDate;
+        if (dueDateTime !== undefined) body.due_date_time = dueDateTime;
+        if (priority !== undefined) body.priority = priority;
+        if (assignee !== undefined) body.assignee = assignee;
+        if (status !== undefined) body.status = status;
+        if (unsetStatus !== undefined) body.unset_status = unsetStatus;
+        const result = await callClickUpApi(
+          `list/${listId}`,
+          "PUT",
+          apiKey,
+          body
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    // Add deleteList tool under updateList
+    this.server.tool(
+      "deleteList",
+      { listId: z.string() },
+      async ({ listId }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const result = await callClickUpApi(`list/${listId}`, "DELETE", apiKey);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
@@ -453,20 +554,42 @@ export class MyMCP extends McpAgent<Env> {
     this.server.tool(
       "searchDocs",
       {
-        workspaceId: z.string(),
-        query: z.string().optional(),
-        page: z.number().optional(),
+        workspaceId: z.number(),
+        id: z.string().optional(),
+        creator: z.number().optional(),
+        deleted: z.boolean().optional(),
+        archived: z.boolean().optional(),
+        parent_id: z.string().optional(),
+        parent_type: z.string().optional(),
+        limit: z.number().optional(),
+        next_cursor: z.string().optional(),
       },
-      async ({ workspaceId, query, page }) => {
+      async ({
+        workspaceId,
+        id,
+        creator,
+        deleted,
+        archived,
+        parent_id,
+        parent_type,
+        limit,
+        next_cursor,
+      }) => {
         const apiKey = getApiKey();
         if (!apiKey)
           return { content: [{ type: "text", text: "API key missing." }] };
         const qs = new URLSearchParams();
-        if (query) qs.set("query", query);
-        if (page !== undefined) qs.set("page", String(page));
+        if (id) qs.set("id", id);
+        if (creator !== undefined) qs.set("creator", String(creator));
+        qs.set("deleted", String(deleted ?? false));
+        qs.set("archived", String(archived ?? false));
+        if (parent_id) qs.set("parent_id", parent_id);
+        if (parent_type) qs.set("parent_type", parent_type);
+        qs.set("limit", String(limit ?? 50));
+        if (next_cursor) qs.set("next_cursor", next_cursor);
         const qstr = qs.toString() ? `?${qs.toString()}` : "";
         const result = await callClickUpApi(
-          `team/${workspaceId}/doc${qstr}`,
+          `/v3/workspaces/${workspaceId}/docs${qstr}`,
           "GET",
           apiKey
         );
@@ -497,13 +620,48 @@ export class MyMCP extends McpAgent<Env> {
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
     );
-    this.server.tool("getDoc", { docId: z.string() }, async ({ docId }) => {
-      const apiKey = getApiKey();
-      if (!apiKey)
-        return { content: [{ type: "text", text: "API key missing." }] };
-      const result = await callClickUpApi(`doc/${docId}`, "GET", apiKey);
-      return { content: [{ type: "text", text: JSON.stringify(result) }] };
-    });
+
+    this.server.tool(
+      "getDoc",
+      { workspaceId: z.number(), docId: z.string() },
+      async ({ workspaceId, docId }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const result = await callClickUpApi(
+          `/v3/workspaces/${workspaceId}/docs/${docId}`,
+          "GET",
+          apiKey
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    // Add getDocPages tool to list pages of a Doc
+    this.server.tool(
+      "getDocPages",
+      {
+        workspaceId: z.number(),
+        docId: z.string(),
+        max_page_depth: z.number().optional(),
+        content_format: z.string().optional(),
+      },
+      async ({ workspaceId, docId, max_page_depth, content_format }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const qs = new URLSearchParams();
+        qs.set("max_page_depth", String(max_page_depth ?? -1));
+        qs.set("content_format", content_format ?? "text/md");
+        const qstr = qs.toString() ? `?${qs.toString()}` : "";
+        const result = await callClickUpApi(
+          `/v3/workspaces/${workspaceId}/docs/${docId}/pages${qstr}`,
+          "GET",
+          apiKey
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
 
     // Comments
     this.server.tool(
