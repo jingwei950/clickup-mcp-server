@@ -76,13 +76,17 @@ export class MyMCP extends McpAgent<Env> {
     // Spaces
     this.server.tool(
       "getSpaces",
-      { workspaceId: z.string() },
-      async ({ workspaceId }) => {
+      {
+        team_id: z.number(),
+        archived: z.boolean().optional(),
+      },
+      async ({ team_id, archived }) => {
         const apiKey = getApiKey();
         if (!apiKey)
           return { content: [{ type: "text", text: "API key missing." }] };
+        const query = archived !== undefined ? `?archived=${archived}` : "";
         const result = await callClickUpApi(
-          `team/${workspaceId}/space`,
+          `team/${team_id}/space${query}`,
           "GET",
           apiKey
         );
@@ -94,24 +98,29 @@ export class MyMCP extends McpAgent<Env> {
       {
         workspaceId: z.string(),
         name: z.string(),
-        features: z
-          .object({
-            lists: z.object({ enabled: z.boolean() }).optional(),
-            tasks: z.object({ enabled: z.boolean() }).optional(),
-            docs: z.object({ enabled: z.boolean() }).optional(),
-            whiteboards: z.object({ enabled: z.boolean() }).optional(),
-          })
-          .optional(),
+        multiple_assignees: z.boolean(),
+        features: z.object({
+          due_dates: z.object({ enabled: z.boolean() }),
+          time_tracking: z.object({ enabled: z.boolean() }),
+          tags: z.object({ enabled: z.boolean() }),
+          time_estimates: z.object({ enabled: z.boolean() }),
+          checklists: z.object({ enabled: z.boolean() }),
+          custom_fields: z.object({ enabled: z.boolean() }),
+          remap_dependencies: z.object({ enabled: z.boolean() }),
+          dependency_warning: z.object({ enabled: z.boolean() }),
+          portfolios: z.object({ enabled: z.boolean() }),
+        }),
       },
-      async ({ workspaceId, name, features }) => {
+      async ({ workspaceId, name, multiple_assignees, features }) => {
         const apiKey = getApiKey();
         if (!apiKey)
           return { content: [{ type: "text", text: "API key missing." }] };
+        const payload = { name, multiple_assignees, features };
         const result = await callClickUpApi(
           `team/${workspaceId}/space`,
           "POST",
           apiKey,
-          { name, features }
+          payload
         );
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
@@ -131,25 +140,48 @@ export class MyMCP extends McpAgent<Env> {
       "updateSpace",
       {
         spaceId: z.string(),
-        name: z.string().optional(),
-        features: z
-          .object({
-            lists: z.object({ enabled: z.boolean() }).optional(),
-            tasks: z.object({ enabled: z.boolean() }).optional(),
-            docs: z.object({ enabled: z.boolean() }).optional(),
-            whiteboards: z.object({ enabled: z.boolean() }).optional(),
-          })
-          .optional(),
+        name: z.string(),
+        color: z.string(),
+        private: z.boolean(),
+        admin_can_manage: z.boolean().optional(),
+        multiple_assignees: z.boolean().optional(),
+        features: z.object({
+          due_dates: z.object({ enabled: z.boolean() }),
+          time_tracking: z.object({ enabled: z.boolean() }),
+          tags: z.object({ enabled: z.boolean() }),
+          time_estimates: z.object({ enabled: z.boolean() }),
+          checklists: z.object({ enabled: z.boolean() }),
+          custom_fields: z.object({ enabled: z.boolean() }),
+          remap_dependencies: z.object({ enabled: z.boolean() }),
+          dependency_warning: z.object({ enabled: z.boolean() }),
+          portfolios: z.object({ enabled: z.boolean() }),
+        }),
       },
-      async ({ spaceId, ...data }) => {
+      async ({
+        spaceId,
+        name,
+        color,
+        private: isPrivate,
+        admin_can_manage,
+        multiple_assignees,
+        features,
+      }) => {
         const apiKey = getApiKey();
         if (!apiKey)
           return { content: [{ type: "text", text: "API key missing." }] };
+        const payload = {
+          name,
+          color,
+          private: isPrivate,
+          admin_can_manage,
+          multiple_assignees,
+          features,
+        };
         const result = await callClickUpApi(
           `space/${spaceId}`,
           "PUT",
           apiKey,
-          data
+          payload
         );
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       }
@@ -196,6 +228,40 @@ export class MyMCP extends McpAgent<Env> {
         const result = await callClickUpApi(
           `space/${spaceId}/folder`,
           "POST",
+          apiKey,
+          { name }
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+    // Get a specific folder by ID
+    this.server.tool(
+      "getFolder",
+      { folderId: z.string() },
+      async ({ folderId }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const result = await callClickUpApi(
+          `folder/${folderId}`,
+          "GET",
+          apiKey
+        );
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      }
+    );
+
+    // Update a folder (rename)
+    this.server.tool(
+      "updateFolder",
+      { folderId: z.string(), name: z.string() },
+      async ({ folderId, name }) => {
+        const apiKey = getApiKey();
+        if (!apiKey)
+          return { content: [{ type: "text", text: "API key missing." }] };
+        const result = await callClickUpApi(
+          `folder/${folderId}`,
+          "PUT",
           apiKey,
           { name }
         );
