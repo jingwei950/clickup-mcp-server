@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  ResourceTemplate,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
 
 export function registerSpaceTools(
   server: McpServer,
@@ -11,8 +14,42 @@ export function registerSpaceTools(
     body?: any
   ) => Promise<any>
 ) {
+  // Resource: fetch a space's metadata
+  server.resource(
+    "clickup_space",
+    new ResourceTemplate("clickup://space/{space_id}", { list: undefined }),
+    {
+      description: "Fetch metadata for a specific space",
+      mimeType: "application/json",
+    },
+    async (uri, { space_id }) => {
+      const apiKey = getApiKey();
+      if (!apiKey)
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({ error: "API key missing." }),
+            },
+          ],
+        };
+      const result = await callClickUpApi(`space/${space_id}`, "GET", apiKey);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    }
+  );
+
   server.tool(
     "getSpaces",
+    "Fetch all spaces in a workspace",
     { teamId: z.number(), archived: z.boolean().optional() },
     async ({ teamId, archived }) => {
       const apiKey = getApiKey();
@@ -30,6 +67,7 @@ export function registerSpaceTools(
 
   server.tool(
     "createSpace",
+    "Create a new space in the specified workspace with given features",
     {
       workspaceId: z.string(),
       name: z.string(),
@@ -75,16 +113,22 @@ export function registerSpaceTools(
     }
   );
 
-  server.tool("getSpace", { spaceId: z.string() }, async ({ spaceId }) => {
-    const apiKey = getApiKey();
-    if (!apiKey)
-      return { content: [{ type: "text", text: "API key missing." }] };
-    const result = await callClickUpApi(`space/${spaceId}`, "GET", apiKey);
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
-  });
+  server.tool(
+    "getSpace",
+    "Fetch metadata for a specific space",
+    { spaceId: z.string() },
+    async ({ spaceId }) => {
+      const apiKey = getApiKey();
+      if (!apiKey)
+        return { content: [{ type: "text", text: "API key missing." }] };
+      const result = await callClickUpApi(`space/${spaceId}`, "GET", apiKey);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+  );
 
   server.tool(
     "updateSpace",
+    "Update properties of a specific space",
     {
       spaceId: z.string(),
       name: z.string(),
@@ -144,11 +188,23 @@ export function registerSpaceTools(
     }
   );
 
-  server.tool("deleteSpace", { spaceId: z.string() }, async ({ spaceId }) => {
-    const apiKey = getApiKey();
-    if (!apiKey)
-      return { content: [{ type: "text", text: "API key missing." }] };
-    const result = await callClickUpApi(`space/${spaceId}`, "DELETE", apiKey);
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
-  });
+  server.tool(
+    "deleteSpace",
+    "Delete a specific space",
+    { spaceId: z.string() },
+    async ({ spaceId }) => {
+      const apiKey = getApiKey();
+      if (!apiKey)
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ error: "API key missing." }),
+            },
+          ],
+        };
+      const result = await callClickUpApi(`space/${spaceId}`, "DELETE", apiKey);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+  );
 }

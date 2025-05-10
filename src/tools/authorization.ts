@@ -1,4 +1,7 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  ResourceTemplate,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
 
 export function registerAuthorizationTools(
   server: McpServer,
@@ -10,35 +13,119 @@ export function registerAuthorizationTools(
     body?: any
   ) => Promise<any>
 ) {
-  server.tool("getAuthorizedUser", {}, async () => {
-    const apiKey = getApiKey();
-    if (!apiKey) {
+  // Resource: fetch authorized user metadata
+  server.resource(
+    "clickup_user",
+    new ResourceTemplate("clickup://user", { list: undefined }),
+    {
+      description: "Fetch metadata for the authorized user",
+      mimeType: "application/json",
+    },
+    async (uri) => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({ error: "API key missing." }),
+            },
+          ],
+        };
+      }
+      const result = await callClickUpApi("user", "GET", apiKey);
       return {
-        content: [
+        contents: [
           {
-            type: "text",
-            text: "API key missing.",
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(result),
           },
         ],
       };
     }
-    const result = await callClickUpApi("user", "GET", apiKey);
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
-  });
+  );
 
-  server.tool("getWorkspaces", {}, async () => {
-    const apiKey = getApiKey();
-    if (!apiKey) {
+  // Resource: fetch a workspace's metadata
+  server.resource(
+    "clickup_workspace",
+    new ResourceTemplate("clickup://workspace/{workspace_id}", {
+      list: undefined,
+    }),
+    {
+      description: "Fetch metadata for a specific workspace",
+      mimeType: "application/json",
+    },
+    async (uri, { workspace_id }) => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({ error: "API key missing." }),
+            },
+          ],
+        };
+      }
+      const result = await callClickUpApi(
+        `team/${workspace_id}`,
+        "GET",
+        apiKey
+      );
       return {
-        content: [
+        contents: [
           {
-            type: "text",
-            text: "API key missing.",
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(result),
           },
         ],
       };
     }
-    const result = await callClickUpApi("team", "GET", apiKey);
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
-  });
+  );
+
+  server.tool(
+    "getAuthorizedUser",
+    "Fetch metadata for the authorized user",
+    {},
+    async () => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "API key missing.",
+            },
+          ],
+        };
+      }
+      const result = await callClickUpApi("user", "GET", apiKey);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+  );
+
+  server.tool(
+    "getWorkspaces",
+    "List all workspaces accessible by the authorized user",
+    {},
+    async () => {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "API key missing.",
+            },
+          ],
+        };
+      }
+      const result = await callClickUpApi("team", "GET", apiKey);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    }
+  );
 }

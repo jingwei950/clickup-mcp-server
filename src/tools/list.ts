@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  ResourceTemplate,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
 
 export function registerListTools(
   server: McpServer,
@@ -121,4 +124,103 @@ export function registerListTools(
     const result = await callClickUpApi(`list/${listId}`, "DELETE", apiKey);
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
   });
+
+  // Resource: fetch a list's metadata
+  server.resource(
+    "clickup_list",
+    new ResourceTemplate("clickup://list/{list_id}", { list: undefined }),
+    async (uri, { list_id }) => {
+      const apiKey = getApiKey();
+      if (!apiKey)
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({ error: "API key missing." }),
+            },
+          ],
+        };
+      const result = await callClickUpApi(`list/${list_id}`, "GET", apiKey);
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    }
+  );
+
+  // Resource: fetch all lists in a folder
+  server.resource(
+    "clickup_folder_lists",
+    new ResourceTemplate("clickup://folder/{folder_id}/lists", {
+      list: undefined,
+    }),
+    async (uri, { folder_id }) => {
+      const apiKey = getApiKey();
+      if (!apiKey)
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({ error: "API key missing." }),
+            },
+          ],
+        };
+      const result = await callClickUpApi(
+        `folder/${folder_id}/list`,
+        "GET",
+        apiKey
+      );
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    }
+  );
+
+  // Resource: fetch all folderless lists in a space
+  server.resource(
+    "clickup_space_lists",
+    new ResourceTemplate("clickup://space/{space_id}/lists", {
+      list: undefined,
+    }),
+    async (uri, { space_id }) => {
+      const apiKey = getApiKey();
+      if (!apiKey)
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: "application/json",
+              text: JSON.stringify({ error: "API key missing." }),
+            },
+          ],
+        };
+      const result = await callClickUpApi(
+        `space/${space_id}/list`,
+        "GET",
+        apiKey
+      );
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: "application/json",
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+    }
+  );
 }
